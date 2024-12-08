@@ -1,24 +1,34 @@
 /**
  * This script handles the (decoupled) loading and booting of the legacy helper.
  */
-legacyHelperScriptFilePath = 'helper/legacy-helper.js'
-legacyHelperScriptFileFullPath = app.getJsAssetsRootPath() + legacyHelperScriptFilePath
+legacyHelperScriptFilePath = 'legacy/legacy-helper.js'
 
 /**
  * Boots the legacy helper.
  */
-function bootLegacyHelper() {
+async function bootLegacyHelper() {
+    console.info('Legacy booter booting.')
+    legacyHelperScriptFileFullPath = app.getJsAssetsRootPath() + legacyHelperScriptFilePath
+    if (!app.scriptIsLoad(legacyHelperScriptFileFullPath)) {
+        // Load it.
+        try {
+            await app.autoloader.loadScript(legacyHelperScriptFileFullPath)
+        }
+        catch (e) {
+            console.group('Legacy booter error.')
+            console.error('Legacy helper could not be booted.')
+            console.error(e)
+            console.groupEnd()
+            return
+        }
+    }
     var legacyHelper = new LegacyHelper()
     legacyHelper.loadAll()
 }
 
-// If legacy helper script file is not loaded.
-if (!app.scriptIsLoad(legacyHelperScriptFileFullPath)) {
-    // Load it.
-    app.autoloader.loadScript(legacyHelperScriptFileFullPath).then(scriptElement => {
-        // Then boot it.
+if (app !== 'undefined' && app.booted === true) bootLegacyHelper()
+else {
+    window.addEventListener('appBooted', e => {
         bootLegacyHelper()
     })
 }
-// Boot it.
-else bootLegacyHelper()

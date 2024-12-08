@@ -31,105 +31,92 @@ class App {
      */
     autoloader = null
     /**
-     * The list of already loaded scripts.
-     * @type {[?string]}
+     * The list of load*** scripts.
+     * @type {Object<string, Promise<HTMLScriptElement>|HTMLScriptElement>}
      */
-    loadScripts = []
-    
+    loadScripts = {}
+    /**
+     * @type {boolean} If the application is booted.
+     */
+    booted = false
 
     /**
      * Boots the application.
      */
     boot() {
-        console.log('App booting.')
+        console.info('App booting.')
         var _this = this
 
         /**
-         * Logs and alerts about boot abort.
-         * @param {string} message 
-         * @param {string} log 
+         * Logs about boot abort.
+         * @param {string} message The log message.
+         * @param {string} log The log content.
          */
         function abortBoot(message, log) {
-            console.log(log)
-            console.log(message +' Aborting app boot. See log for details.')
+            console.group('Aborting app boot.')
+            console.error(message +' Error details below:')
+            console.error(log)
+            console.groupEnd()
         }
 
-        // When page is loaded.
-        window.addEventListener('load', async function(e) {
-            console.log('Loading essential assets.')
-            // Load essential components.
-            // Load the file loader.
-            try {
-                /** @type {FileLoader} */
-                var fileLoader = await _this.loadFileLoader()
-                _this.fileLoader = fileLoader
-            }
-            catch(e) {
-                return abortBoot('File loader could not be loaded.', e)
-            }
+        // Once page is loaded.
+        window.addEventListener('load', async e => {
+            console.info('Loading assets/components.')
             
-            // Load the autoloader.
+            // Load assets/components.
+            //// Load the file loader.
             try {
-                var autoloaderFilePath = _this.getAutoloaderFilePath()
-                var autoloaderLoadPromise = fileLoader.loadScript(autoloaderFilePath)
-                _this.addLoadingScript(autoloaderFilePath, autoloaderLoadPromise)
-                // Wait for the autoloader script file to be loaded.
-                await autoloaderLoadPromise
-
-                // Then instantiate it.
-                var autoloader = new Autoloader
-                _this.autoloader = autoloader
-                autoloader.setFileLoader(fileLoader)
-
-                console.log('Autoloader loaded.')
+                await _this.loadFileLoader()
+                console.info('File loader loaded.')
             }
-            catch(e) {
-                return abortBoot('Autoloader could not be loaded.', e)
-            }
-
-            // Load all other scripts.
-            try {
-                /* var t = await autoloader.loadAll()
-                console.log(t)
-                var loadAllSuccess = (t).every(Boolean) */
-                //alert('>'+ [true, true, [true, true, false,],].flat(Infinity).every(Boolean))
-
-                var scriptElements = await autoloader.loadAll()
-            }
-            catch(e) {
-                return abortBoot('Not all scripts could be loaded.', e)
-            }
-
-            // Load all legacy scripts.
-
-
+            catch(e) {return abortBoot('File loader could not be loaded.', e)}
             
-            // If this code is reached, it's because "load all" was resolved.
-            console.log(scriptElements)
-            console.log('App fully booted.')
+            //// Load the autoloader.
+            try {
+                await _this.loadAutoloader()
+                console.info('Autoloader loaded.')
+            }
+            catch(e) {return abortBoot('Autoloader could not be loaded.', e)}
+
+            //// Load all other scripts.
+            try {
+                var scriptElements = await _this.autoloader.loadAll()
+            }
+            catch(e) {return abortBoot('Not all scripts could be loaded.', e)}
+
+
+            this.booted = true
+            var appBootedEvent = new CustomEvent('appBooted')
+            window.dispatchEvent(appBootedEvent);
+            console.info('App fully booted.')
         })
     }
 
+
+    //// Load components ////
+
     /**
      * Loads the file loader.
-     * @returns {Promise.<FileLoader|Error>|Error} The file loader if it was successfuly loaded.
+     * @returns {Promise<boolean>} If the load was successful.
      */
     async loadFileLoader() {
         var fileLoaderFilePath = this.getFileLoaderFilePath()
         var fileLoaderScriptElement = document.createElement('script')
         
         // https://stackoverflow.com/questions/67016273/multiple-onload-events-with-javascript-promise
+        /**
+         * @type {Promise<HTMLScriptElement|Error>}
+         */
         var fileLoaderLoadPromise = new Promise((fileLoaderLoadSuccess, fileLoaderLoadFail) => {
-            // If load succeeded.
             fileLoaderScriptElement.addEventListener('load', function(e) {
-                // Instantiate and resolve with the file loader.
-                fileLoaderLoadSuccess(new FileLoader)
+                fileLoaderLoadSuccess(fileLoaderScriptElement)
+                console.info('File loader script file successfuly loaded.')
             })
-            // If load failed, reject with an error.
+
             fileLoaderScriptElement.addEventListener('error', function(e){
-                // https://javascript.info/promise-error-handling#implicit-try-catch
-                fileLoaderLoadFail(new Error('File loader script file could not be loaded.'))
                 document.head.removeChild(fileLoaderScriptElement)
+                fileLoaderLoadFail(new Error('File loader script file could not be loaded.'))
+                console.info('File loader script file could not be loaded.')
             })
         })
         this.addLoadingScript(fileLoaderFilePath, fileLoaderLoadPromise)
@@ -139,7 +126,23 @@ class App {
         fileLoaderScriptElement.src = fileLoaderFilePath
         document.head.appendChild(fileLoaderScriptElement)
         
-        return fileLoaderLoadPromise
+        await fileLoaderLoadPromise
+        this.fileLoader = new FileLoader
+        return true
+    }
+
+    /**
+     * Loads the autoloader.
+     * @returns {Promise<boolean>} If the load was successful.
+     */
+    async loadAutoloader() {
+        var autoloaderFilePath = this.getAutoloaderFilePath()
+        var autoloaderLoadPromise = this.fileLoader.loadScript(autoloaderFilePath)
+        this.addLoadingScript(autoloaderFilePath, autoloaderLoadPromise)
+        
+        await autoloaderLoadPromise
+        this.autoloader = new Autoloader(this.fileLoader)
+        return true
     }
 
 
@@ -165,64 +168,59 @@ class App {
     /**
      * Adds a loading script.
      * @param {string} scriptFilePath The script file path.
-     * @param {Promise} loadPromise The load script promise.
+     * @param {Promise<HTMLScriptElement|Error>} loadPromise The script load promise.
      */
-    addLoadingScript(scriptFilePath, loadPromise) {
-        console.log('App.addLoadingScript('+ scriptFilePath +')')
-        this.loadScripts.push(this.getPrefixedFilePath(scriptFilePath))
-        // When successfuly loaded.
-        loadPromise.then(scriptElement => {
-            // Add to loaded script.
-            this.addLoadedScript(scriptFilePath)
-        })
+    async addLoadingScript(scriptFilePath, loadPromise) {
+        console.info('App.addLoadingScript('+ scriptFilePath +')')
+        this.loadScripts[this.getPrefixedFilePath(scriptFilePath)] = loadPromise
+                
+        try {
+            // Register automatic transfer to loaded script when loaded.
+            var scriptElement = await loadPromise
+            this.addLoadedScript(scriptFilePath, scriptElement)
+        }
+        catch (e) {}
     }
 
     /**
      * Removes a loading script.
-     * @param {string} scriptFilePath 
+     * @param {string} scriptFilePath The script file path.
      */
     removeLoadingScript(scriptFilePath) {
-        console.log('App.removeLoadingScript('+ scriptFilePath +')')
-        const index = this.loadScripts.indexOf('~'+ scriptFilePath);
-        if (index > -1) this.loadScripts.splice(index, 1)
+        console.info('App.removeLoadingScript('+ scriptFilePath +')')
+        delete this.loadScripts[this.getPrefixedFilePath(scriptFilePath)]
     }
 
     /**
      * Adds a loaded script.
-     * @param {string} scriptFilePath 
+     * @param {string} scriptFilePath The script file path.
+     * @param {HTMLScriptElement} scriptElement The script DOM element.
      */
-    addLoadedScript(scriptFilePath) {
-        console.log('App.addLoadedScript('+ scriptFilePath +')')
+    addLoadedScript(scriptFilePath, scriptElement) {
+        console.info('App.addLoadedScript('+ scriptFilePath +')')
         this.removeLoadingScript(scriptFilePath)
-        this.loadScripts.push(scriptFilePath)
+        this.loadScripts[scriptFilePath] = scriptElement
     }
 
     /**
-     * Return an array of loading and loaded scripts.
-     * @returns {[string]} The array of loading and loaded scripts.
+     * Return an array of loading/loaded scripts.
+     * @returns {Object<string, Promise<HTMLScriptElement>|HTMLScriptElement>} The array of loading/loaded scripts.
      */
     getLoadScripts() {
         return this.loadScripts
     }
 
     /**
-     * Returns an array of loading scripts.
-     * @returns {[string]} The array of loading scripts.
+     * Return the load*** script for the provided file path.
+     * @param {string} scriptFilePath The path of the script file.
+     * @throws {Error} If the script file is not load***.
      */
-    getLoadingScripts() {
-        return this.getLoadScripts().filter(script => {
-            return script.startsWith(this.getLoadingPrefix())
-        })
-    }
-    
-    /**
-     * Returns an array of loaded scripts.
-     * @returns {[string]} The array of loaded scripts.
-     */
-    getLoadedScripts() {
-        return this.getLoadScripts().filter(script => {
-            return !script.startsWith(this.getLoadingPrefix())
-        })
+    getLoadScript(scriptFilePath) {
+        if (!this.scriptIsLoad(scriptFilePath)) throw new Error('Script file "'+ scriptFilePath +'" is not load.')
+        
+        var loadingScript, loadedScript
+        if (loadingScript = this.getLoadScripts()[app.getPrefixedFilePath(scriptFilePath)]) return loadingScript
+        else if (loadedScript = this.getLoadScripts()[scriptFilePath]) return loadedScript
     }
 
     /**
@@ -231,25 +229,7 @@ class App {
      * @returns {boolean} If the file is already load***.
      */
     scriptIsLoad(scriptFilePath) {
-        return this.getLoadScripts().includes(this.getPrefixedFilePath(scriptFilePath))
-    }
-
-    /**
-     * Returns if the specified script is loading.
-     * @param {string} scriptFilePath The script file path.
-     * @returns {boolean} If the file is already loading.
-     */
-    scriptIsLoading(scriptFilePath) {
-        return this.getLoadingScripts().includes(this.getPrefixedFilePath(scriptFilePath))
-    }
-
-    /**
-     * Returns if the specified script is loaded.
-     * @param {string} scriptFilePath The script file path.
-     * @returns {boolean} If the file is already loaded.
-     */
-    scriptIsLoaded(scriptFilePath) {
-        return this.getLoadedScripts().includes(scriptFilePath)
+        return typeof this.getLoadScripts()[this.getPrefixedFilePath(scriptFilePath)] !== 'undefined'
     }
 
 

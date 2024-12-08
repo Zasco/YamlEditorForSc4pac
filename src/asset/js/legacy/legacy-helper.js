@@ -21,7 +21,7 @@ class LegacyHelper {
 
     /**
      * Return the javascript assets directory path.
-     * @returns {string}
+     * @returns {string} The javascript assets directory path.
      */
     getJsAssetsRootPath() {
         return this.assetsPath + this.jsAssetsPath
@@ -30,11 +30,18 @@ class LegacyHelper {
     /**
      * Loads all legacy scripts.
      */
-    loadAll() {
-        console.log('LegacyHelper.loadAll')
-        var _this = this
-        app.autoloader.loadScripts(this.scripts.map(script => {
-            return _this.getJsAssetsRootPath() + script
-        }))
+    async loadAll() {
+        console.info('LegacyHelper.loadAll')
+        this.scripts.forEach(async script => {
+            try {
+                await app.autoloader.loadScript(this.getJsAssetsRootPath() + script)
+            }
+            catch (e) {
+                console.group('Legacy helper error.')
+                console.error('Not all legacy scripts could be loaded. Error details below:')
+                console.error(e)
+                console.groupEnd()
+            }
+        })
     }
 }
