@@ -1,0 +1,1 @@
+var app = AppKernel.boot()
